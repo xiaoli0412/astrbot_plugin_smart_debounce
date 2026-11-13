@@ -1,0 +1,92 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "启用智能防抖",
+    "default": true,
+    "hint": "总开关。关闭后插件不拦截任何消息，行为与未安装时完全一致，适合临时排查问题。"
+  },
+  "merge_window_seconds": {
+    "type": "float",
+    "description": "合并窗口（秒，尾随）",
+    "default": 9,
+    "hint": "从最后一条消息起算，等这么久没有新消息就放行。实测 93 条真实消息：用户连发间隔中位数 14 秒、最小 6 秒（7 个样本），实际响应延迟中位数 7 秒。默认 9 秒＝比最快连发（6s）多留 3 秒余量，又不会让单条消息等太久；想更跟手可用 5，慢节奏聊天用 15。"
+  },
+  "max_wait_seconds": {
+    "type": "float",
+    "description": "最长等待硬上限（秒）",
+    "default": 20,
+    "hint": "从第一条消息起算的绝对上限，防止用户一直补句导致永不回复。默认 20 秒＝原 debounce 插件一次阻塞的时长，但这里只在极端连发时才会触达；正常连发受 merge_window_seconds 控制，通常 9 秒内就发出。设为 0 表示不设硬上限。"
+  },
+  "burst_max_messages": {
+    "type": "int",
+    "description": "连发条数上限（攒够即发）",
+    "default": 6,
+    "hint": "缓冲区达到这么多条立即放行，不再等窗口。真实数据里单轮连发很少超过 4 条，默认 6 条留出余量，同时防止刷屏式输入把回复无限延后。"
+  },
+  "flush_on_media": {
+    "type": "bool",
+    "description": "图片/文件消息立即完成合并",
+    "default": true,
+    "hint": "图文混发是常见模式：用户发完图就停下来等回复了。设为 true 时，任何带图片/文件/语音/视频的消息一到就立刻放行，不再等满窗口；关掉会让发图后多等一个窗口。"
+  },
+  "skip_commands": {
+    "type": "bool",
+    "description": "跳过以 / 开头的指令",
+    "default": true,
+    "hint": "指令需要立刻执行，被防抖吞掉会造成「发了指令没反应」。默认 true；除非你确认所有指令都不走 LLM 链路，否则不要关。"
+  },
+  "skip_tool_rounds": {
+    "type": "bool",
+    "description": "跳过工具调用轮次",
+    "default": true,
+    "hint": "工具续写轮次（带 tool_calls_result 的请求）属于同一次回复的内部步骤，参与防抖会打断工具链。默认 true。注意：agent 模式下 func_tool 恒非空，故本插件用 tool_calls_result 判定，而不是 func_tool。"
+  },
+  "per_session_override": {
+    "type": "bool",
+    "description": "启用按会话覆盖窗口",
+    "default": false,
+    "hint": "开启后读取 per_session_windows，为特定会话单独设定窗口。默认 false，因为绝大多数场景一个全局窗口就够；群聊和私聊节奏差异大时才需要分别配置。"
+  },
+  "per_session_windows": {
+    "type": "dict",
+    "description": "按会话覆盖的窗口（umo → 秒）",
+    "default": {},
+    "hint": "键是 unified_msg_origin（格式 platform:message_type:session_id，如 aiocqhttp:FriendMessage:123456），值是窗口秒数。只有 per_session_override 开启时才生效。示例：{\"aiocqhttp:FriendMessage:123456\": 5}"
+  },
+  "debug_log": {
+    "type": "bool",
+    "description": "输出调试日志",
+    "default": false,
+    "hint": "开启后每条消息的登记/并入/放行都会打 INFO 日志，便于排查「为什么没合并」。默认 false，避免刷屏；日常排障时临时打开即可。"
+  },
+  "adaptive_enabled": {
+    "description": "启用自适应窗口",
+    "type": "bool",
+    "default": true,
+    "hint": "开着更跟手：单句用短窗、检测到连发用长窗。关掉则固定用 merge_window_seconds。"
+  },
+  "adaptive_short_window": {
+    "description": "短窗口（秒）",
+    "type": "float",
+    "default": 6,
+    "hint": "最近没连发时用这个。6 秒是实测到的最小连发间隔——再短就抓不住「发一句、5-6 秒后补一句」这种最常见的情况。"
+  },
+  "adaptive_long_window": {
+    "description": "长窗口（秒）",
+    "type": "float",
+    "default": 9,
+    "hint": "检测到连发时用这个。你的连发间隔中位 14 秒、最小 6 秒，9 秒能抓住大部分。"
+  },
+  "adaptive_burst_gap": {
+    "description": "判定连发的间隔（秒）",
+    "type": "float",
+    "default": 15,
+    "hint": "两条消息间隔小于这个值，就算一次连发。"
+  },
+  "adaptive_memory_seconds": {
+    "description": "连发记忆窗口（秒）",
+    "type": "float",
+    "default": 600,
+    "hint": "多久内发生过连发，就认为现在还在连发状态。默认 10 分钟。"
+  }
+}

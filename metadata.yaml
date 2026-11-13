@@ -1,0 +1,14 @@
+name: astrbot_plugin_smart_debounce
+display_name: 智能防抖
+short_desc: 用时间窗口而不是语义判断合并连发消息（9秒窗口/20秒封顶）
+desc: >-
+  现有 debounce 用 ONNX 判断「这句话说完没」，但实测「我今天去工房了」只有 0.308 分、被判没说完阻塞 20 秒。真实数据表明用户连发间隔中位数 14 秒、最小 6 秒，第一句语义本来就完整——判据维度错了。本插件改用时间：收到消息后固定等 N 秒（默认 9），期间新消息全部累积合并成一条再一次性发给 LLM。支持图片/文件立即放行、指令跳过、工具轮次跳过、每会话独立窗口。
+version: 1.0.0
+author: xiaoli0412
+repo: https://github.com/xiaoli0412/astrbot_plugin_smart_debounce
+category: 体验优化
+tags: [防抖, 消息合并, 延迟优化]
+support_platforms:
+  - aiocqhttp
+astrbot_version: '>=4.24,<5'
+license: MIT

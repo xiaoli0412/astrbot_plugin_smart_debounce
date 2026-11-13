@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>智能防抖</title>
+<style>
+  :root{--bg:#0f1115;--panel:#171a21;--line:#242a35;--text:#e8ecf3;
+        --muted:#8b95a7;--accent:#6ea8fe;--ok:#3fb950;--warn:#d29922}
+  @media (prefers-color-scheme:light){:root{--bg:#f6f7f9;--panel:#fff;
+        --line:#e3e6ec;--text:#1a1d23;--muted:#6b7280;--accent:#2563eb}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",
+            "PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:900px;margin:0 auto;padding:20px}
+  header{display:flex;align-items:baseline;gap:12px;margin-bottom:16px}
+  h1{font-size:19px;margin:0;font-weight:650}
+  .sub{color:var(--muted);font-size:12.5px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
+        gap:10px;margin-bottom:18px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+        padding:13px 15px}
+  .stat .k{color:var(--muted);font-size:11.5px;margin-bottom:3px}
+  .stat .v{font-size:21px;font-weight:650;line-height:1.15}
+  .stat .v small{font-size:12px;font-weight:400;color:var(--muted)}
+  h2{font-size:14px;margin:20px 0 10px;font-weight:620;color:var(--muted)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+        padding:12px 15px;margin-bottom:8px}
+  .row{display:flex;align-items:center;gap:10px;font-size:13px}
+  .badge{font-size:11px;padding:1.5px 7px;border-radius:5px;
+         background:rgba(110,168,254,.14);color:var(--accent);font-weight:600}
+  .badge.warn{background:rgba(210,153,34,.15);color:var(--warn)}
+  .badge.ok{background:rgba(63,185,80,.15);color:var(--ok)}
+  .muted{color:var(--muted);font-size:12px}
+  .preview{color:var(--muted);font-size:12.5px;margin-top:4px;
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .empty{color:var(--muted);text-align:center;padding:26px 0;font-size:13px}
+  .bar{display:flex;gap:8px;margin-bottom:12px}
+  button{padding:8px 14px;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel);color:var(--text);cursor:pointer;font-size:13px}
+  button:hover{border-color:var(--accent)}
+  .foot{color:var(--muted);font-size:11.5px;text-align:center;margin-top:22px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>智能防抖</h1>
+    <span class="sub" id="conn">连接中…</span>
+  </header>
+
+  <div class="grid" id="stats"></div>
+
+  <div class="bar"><button id="refresh">刷新</button><button id="clear">清空记录</button></div>
+
+  <h2>正在等待的会话</h2>
+  <div id="sessions"><div class="empty">当前没有缓冲中的会话</div></div>
+
+  <h2>最近 10 次合并</h2>
+  <div id="records"><div class="empty">还没有发生合并</div></div>
+
+  <div class="foot">窗口内收到的消息会累积成一条再发给模型；超过上限强制放行。</div>
+</div>
+
+<script type="module">
+const PLUGIN_ID = "astrbot_plugin_smart_debounce";
+const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
+const el = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g,
+  (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function apiGet(ep) {
+  const p = await bridge.apiGet(`${PLUGIN_ID}/${ep}`);
+  if (p && p.ok === false) throw new Error(p.error || "请求失败");
+  return p && Object.prototype.hasOwnProperty.call(p, "data") ? p.data : p;
+}
+async function apiPost(ep, body) {
+  const p = await bridge.apiPost(`${PLUGIN_ID}/${ep}`, body || {});
+  if (p && p.ok === false) throw new Error(p.error || "操作失败");
+  return p || {};
+}
+
+function render(d) {
+  const c = d.config || {};
+  el("stats").innerHTML = `
+    <div class="stat"><div class="k">状态</div><div class="v">${c.enabled ? "开启" : "关闭"}</div></div>
+    <div class="stat"><div class="k">合并窗口</div><div class="v">${c.merge_window_seconds}<small> 秒</small></div></div>
+    <div class="stat"><div class="k">最长等待</div><div class="v">${c.max_wait_seconds}<small> 秒</small></div></div>
+    <div class="stat"><div class="k">累计合并</div><div class="v">${d.total_merges ?? 0}<small> 次</small></div></div>
+    <div class="stat"><div class="k">缓冲中</div><div class="v">${(d.sessions||[]).length}<small> 会话</small></div></div>`;
+
+  const ss = d.sessions || [];
+  el("sessions").innerHTML = ss.length ? ss.map(s => `
+    <div class="card">
+      <div class="row">
+        <span class="badge warn">${s.count} 条</span>
+        <span>已等 ${s.waited}s / 上限 ${s.hard_deadline}s</span>
+      </div>
+      <div class="preview">${esc(s.preview || "(无文本)")}</div>
+      <div class="preview">${esc(s.umo)}</div>
+    </div>`).join("") : `<div class="empty">当前没有缓冲中的会话</div>`;
+
+  const rs = d.records || [];
+  el("records").innerHTML = rs.length ? rs.slice().reverse().map(r => `
+    <div class="card">
+      <div class="row">
+        <span class="badge ok">#${r.seq}</span>
+        <span class="muted">${esc(r.at)}</span>
+        <span>合并 <b>${r.count}</b> 条</span>
+        <span class="muted">等 ${r.waited}s</span>
+        <span class="badge">${esc(r.reason || "")}</span>
+      </div>
+      <div class="preview">${esc(r.preview || "")}</div>
+    </div>`).join("") : `<div class="empty">还没有发生合并</div>`;
+}
+
+async function load() {
+  try {
+    el("conn").textContent = "已连接";
+    render(await apiGet("overview"));
+  } catch (e) {
+    el("conn").textContent = "连接失败";
+  }
+}
+
+async function boot() {
+  if (!bridge) { el("conn").textContent = "bridge 未加载"; return; }
+  await bridge.ready();
+  await load();
+  el("refresh").onclick = load;
+  el("clear").onclick = async () => {
+    if (!confirm("清空合并记录？")) return;
+    await apiPost("clear"); load();
+  };
+  setInterval(load, 5000);
+}
+boot();
+</script>
+</body>
+</html>
